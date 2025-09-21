@@ -12,6 +12,8 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
+const diagMsg = "map[string]bool only stores \"true\" values; consider map[string]struct{}"
+
 func TestAnalyzer(t *testing.T) {
 	t.Parallel()
 
@@ -24,198 +26,198 @@ func TestAnalyzer(t *testing.T) {
 			name: "only true assignments",
 			src: `package p
 
-func f() {
-    set := map[string]bool{}
-    set["a"] = true
-    set["b"] = true
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					set := map[string]bool{}
+					set["a"] = true
+					set["b"] = true
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "includes false",
 			src: `package p
 
-func f() {
-    set := map[string]bool{}
-    set["a"] = true
-    set["b"] = false
-}
-`,
+				func f() {
+					set := map[string]bool{}
+					set["a"] = true
+					set["b"] = false
+				}
+				`,
 			wantMsgs: nil,
 		},
 		{
 			name: "variable assignment",
 			src: `package p
 
-func f(b bool) {
-    set := map[string]bool{}
-    set["a"] = b
-}
-`,
+				func f(b bool) {
+					set := map[string]bool{}
+					set["a"] = b
+				}
+				`,
 			wantMsgs: nil,
 		},
 		{
 			name: "composite literal",
 			src: `package p
 
-var set = map[string]bool{
-    "a": true,
-    "b": true,
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				var set = map[string]bool{
+					"a": true,
+					"b": true,
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "struct field",
 			src: `package p
 
-type S struct {
-    set map[string]bool
-}
-
-func (s *S) init() {
-    s.set = make(map[string]bool)
-    s.set["ok"] = true
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				type S struct {
+					set map[string]bool
+				}
+				
+				func (s *S) init() {
+					s.set = make(map[string]bool)
+					s.set["ok"] = true
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "const true variable",
 			src: `package p
 
-const alwaysTrue = true
-
-func f() {
-    set := map[string]bool{}
-    set["a"] = alwaysTrue
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				const alwaysTrue = true
+				
+				func f() {
+					set := map[string]bool{}
+					set["a"] = alwaysTrue
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "local true variable",
 			src: `package p
 
-func f() {
-    flag := true
-    set := make(map[string]bool)
-    set["a"] = flag
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					flag := true
+					set := make(map[string]bool)
+					set["a"] = flag
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "local variable reassigned false before use",
 			src: `package p
 
-func f() {
-    flag := true
-    flag = false
-    set := make(map[string]bool)
-    set["a"] = flag
-}
-`,
+				func f() {
+					flag := true
+					flag = false
+					set := make(map[string]bool)
+					set["a"] = flag
+				}
+				`,
 			wantMsgs: nil,
 		},
 		{
 			name: "global true variable not trusted",
 			src: `package p
 
-var alwaysTrue = true
-
-func f() {
-    set := make(map[string]bool)
-    set["a"] = alwaysTrue
-}
-`,
+				var alwaysTrue = true
+				
+				func f() {
+					set := make(map[string]bool)
+					set["a"] = alwaysTrue
+				}
+				`,
 			wantMsgs: nil,
 		},
 		{
 			name: "tuple assignment all true",
 			src: `package p
 
-func f() {
-    set := make(map[string]bool)
-    set["a"], set["b"] = true, true
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					set := make(map[string]bool)
+					set["a"], set["b"] = true, true
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "tuple assignment with false",
 			src: `package p
 
-func f() {
-    set := make(map[string]bool)
-    set["a"], set["b"] = true, false
-}
-`,
+				func f() {
+					set := make(map[string]bool)
+					set["a"], set["b"] = true, false
+				}
+				`,
 			wantMsgs: nil,
 		},
 		{
 			name: "constant folded true expression",
 			src: `package p
 
-func f() {
-    set := make(map[string]bool)
-    set["a"] = 1 < 2
-    set["b"] = !false
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					set := make(map[string]bool)
+					set["a"] = 1 < 2
+					set["b"] = !false
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "type alias map",
 			src: `package p
 
-type stringSet map[string]bool
-
-func f() {
-    set := make(stringSet)
-    set["a"] = true
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				type stringSet map[string]bool
+				
+				func f() {
+					set := make(stringSet)
+					set["a"] = true
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "chained true locals",
 			src: `package p
 
-func f() {
-    flag := true
-    alias := flag
-    set := make(map[string]bool)
-    set["a"] = alias
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					flag := true
+					alias := flag
+					set := make(map[string]bool)
+					set["a"] = alias
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "loop assignments",
 			src: `package p
 
-func f() {
-    keys := []string{"a", "b"}
-    set := make(map[string]bool)
-    for _, k := range keys {
-        set[k] = true
-    }
-}
-`,
-			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+				func f() {
+					keys := []string{"a", "b"}
+					set := make(map[string]bool)
+					for _, k := range keys {
+						set[k] = true
+					}
+				}
+				`,
+			wantMsgs: []string{diagMsg},
 		},
 		{
 			name: "pointer dereference assignment not reported",
 			src: `package p
 
-func f() {
-    set := make(map[string]bool)
-    setPtr := &set
-    (*setPtr)["a"] = true
-}
-`,
+				func f() {
+					set := make(map[string]bool)
+					setPtr := &set
+					(*setPtr)["a"] = true
+				}
+				`,
 			wantMsgs: nil,
 		},
 	}
