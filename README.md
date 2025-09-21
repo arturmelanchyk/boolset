@@ -1,11 +1,56 @@
 # boolset
 
-A Go linter that detects usages of `map[T]bool` where the map is acting as a **set**, and suggests replacing it with
-`map[T]struct{}` for reduced memory usage.
+`boolset` is a Go linter that finds `map[T]bool` values which are effectively used as sets and recommends switching to
+`map[T]struct{}`. The replacement avoids storing redundant boolean payloads and can cut memory usage for large maps in
+half while keeping semantics identical.
 
-## Why?
+## Why it matters
 
-In Go, a common idiom for sets is:
+The canonical set idiom in Go is to use a map whose values are the zero-sized struct:
 
 ```go
-set := map[string]struct{}
+set := map[string]struct{}{"a": {}, "b": {}}
+```
+
+Using `map[T]bool` instead means every entry carries a full boolean value. When all stored values are `true`, that extra
+byte is wasted on every element, and the intent of “membership only” is less clear to readers. `boolset` pinpoints those
+cases so teams can standardise on the more efficient pattern.
+
+## How the linter decides
+
+`boolset` performs a full type-check of the package and then walks the syntax tree to discover assignments into
+`map[T]bool` values. A warning is only emitted when the linter can *prove* that every assignment stores `true`.
+
+The analyser currently recognises the following as evidence of `true`-only usage:
+
+- Explicit literals, e.g. `m[key] = true` or `map[string]bool{"a": true}`.
+- Local boolean variables that are provably always `true` within their scope (`flag := true` that is never written to
+  another value).
+- Predeclared or constant identifiers that resolve to the literal `true`.
+
+Assignments that introduce `false`, rely on user input, call results, or refer to variables that might change value keep
+the map out of the warning set. Composite literals, struct fields, and method receivers are all inspected, but global
+variables and fields are treated conservatively because their values might change outside the analyser’s view.
+
+Example diagnostic:
+
+```
+path/to/file.go:12:9: map[string]bool only stores true values; consider map[string]struct{}
+```
+
+## Running the linter
+
+The repository ships with a simple CLI wrapper:
+
+```bash
+go run ./cmd/boolsetlint ./...
+```
+
+The tool exits with a non-zero status if any eligible `map[T]bool` usages are found, making it easy to wire into CI or a
+pre-commit hook.
+
+## Limitations and roadmap
+
+The linter focuses on provable `true` assignments. It does not attempt deep data-flow analysis across function
+boundaries, so cases where a helper always returns `true` will not trigger unless they are constant-folded by the type
+checker. Contributions that expand the reasoning while keeping false positives low are welcome.
