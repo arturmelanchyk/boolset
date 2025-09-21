@@ -1,9 +1,7 @@
-name: Release On Merge
+name: Release Workflow
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   test-and-tag:
