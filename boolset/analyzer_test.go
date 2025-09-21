@@ -84,6 +84,25 @@ func TestAnalyzer(t *testing.T) {
 			wantMsgs: []string{diagMsg},
 		},
 		{
+			name: "struct field with both true and false",
+			src: `package p
+
+				type S struct {
+					set map[string]bool
+				}
+				
+				func (s *S) init() {
+					s.set = make(map[string]bool)
+					s.set["ok"] = true
+				}
+
+				func (s *S) close() {
+					s.set["err"] = false
+				}
+				`,
+			wantMsgs: nil,
+		},
+		{
 			name: "const true variable",
 			src: `package p
 
@@ -95,6 +114,22 @@ func TestAnalyzer(t *testing.T) {
 				}
 				`,
 			wantMsgs: []string{diagMsg},
+		},
+		{
+			name: "const true variable overridden by local",
+			src: `package p
+
+				const alwaysTrue = true
+				
+				func f() {
+					set := map[string]bool{}
+					set["a"] = alwaysTrue
+
+					var alwaysFalse bool
+					set["b"] = alwaysFalse
+				}
+				`,
+			wantMsgs: nil,
 		},
 		{
 			name: "local true variable",
@@ -216,6 +251,21 @@ func TestAnalyzer(t *testing.T) {
 					set := make(map[string]bool)
 					setPtr := &set
 					(*setPtr)["a"] = true
+				}
+				`,
+			wantMsgs: nil,
+		},
+		{
+			name: "assignment of function call result not reported",
+			src: `package p
+
+				func f() {
+					set := make(map[string]bool)
+					set["a"] = g()
+				}
+
+				func g() bool {
+					return true
 				}
 				`,
 			wantMsgs: nil,
