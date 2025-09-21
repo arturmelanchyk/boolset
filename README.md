@@ -49,6 +49,9 @@ go run ./cmd/boolsetlint ./...
 The tool exits with a non-zero status if any eligible `map[T]bool` usages are found, making it easy to wire into CI or a
 pre-commit hook.
 
+The CLI understands Go's `...` package patterns, so paths like `./...` or `internal/...` recurse through matching
+directories. Use standard shell quoting if your shell expands `...` glob patterns.
+
 ## Limitations and roadmap
 
 The linter focuses on provable `true` assignments. It does not attempt deep data-flow analysis across function

@@ -12,24 +12,25 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/arturmelanchyk/boolset/boolset"
 )
 
 func main() {
 	flag.Parse()
-	args := flag.Args()
-	if len(args) == 0 {
-		args = []string{"."}
+	targets, err := expandTargets(flag.Args())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 
 	hadError := false
-	for _, path := range args {
+	for _, path := range targets {
 		if err := inspectPath(path); err != nil {
-			if _, err := fmt.Fprintln(os.Stderr, err); err != nil {
-				os.Exit(1)
-			}
+			fmt.Fprintln(os.Stderr, err)
 			hadError = true
 		}
 	}
@@ -133,4 +134,144 @@ func parseFiles(dir string, names []string) ([]*ast.File, *token.FileSet, error)
 		files = append(files, file)
 	}
 	return files, fset, nil
+}
+
+func expandTargets(args []string) ([]string, error) {
+	if len(args) == 0 {
+		args = []string{"."}
+	}
+
+	seen := make(map[string]struct{})
+	var targets []string
+	for _, arg := range args {
+		expanded, err := expandArg(arg)
+		if err != nil {
+			return nil, err
+		}
+		for _, target := range expanded {
+			clean := filepath.Clean(target)
+			if _, ok := seen[clean]; ok {
+				continue
+			}
+			seen[clean] = struct{}{}
+			targets = append(targets, clean)
+		}
+	}
+	return targets, nil
+}
+
+func expandArg(arg string) ([]string, error) {
+	if strings.Contains(arg, "...") {
+		dirs, err := expandEllipsis(arg)
+		if err != nil {
+			return nil, err
+		}
+		if len(dirs) == 0 {
+			return nil, fmt.Errorf("pattern %q matched no directories", arg)
+		}
+		return dirs, nil
+	}
+	return []string{arg}, nil
+}
+
+func expandEllipsis(pattern string) ([]string, error) {
+	re, err := compilePattern(pattern)
+	if err != nil {
+		return nil, err
+	}
+	root := walkRoot(pattern)
+	if _, err := os.Stat(root); err != nil {
+		return nil, err
+	}
+
+	var dirs []string
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info == nil || !info.IsDir() {
+			return nil
+		}
+		candidate := normalizeForMatch(path)
+		if re.MatchString(candidate) || (candidate != "." && re.MatchString(candidate+"/")) {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+func walkRoot(pattern string) string {
+	idx := strings.Index(pattern, "...")
+	root := pattern
+	if idx != -1 {
+		root = pattern[:idx]
+	}
+	root = filepath.Clean(filepath.FromSlash(root))
+	if root == "" {
+		return "."
+	}
+	return root
+}
+
+func compilePattern(pattern string) (*regexp.Regexp, error) {
+	norm := normalizeForMatch(pattern)
+	var sb strings.Builder
+	sb.WriteString("^")
+	for i := 0; i < len(norm); {
+		if strings.HasPrefix(norm[i:], "...") {
+			sb.WriteString(".*")
+			i += 3
+			continue
+		}
+		switch norm[i] {
+		case '*':
+			sb.WriteString("[^/]*")
+		case '?':
+			sb.WriteString("[^/]")
+		default:
+			sb.WriteString(regexp.QuoteMeta(norm[i : i+1]))
+		}
+		i++
+	}
+	sb.WriteString("$")
+	return regexp.Compile(sb.String())
+}
+
+func normalizeForMatch(path string) string {
+	if path == "" {
+		return "."
+	}
+	path = filepath.ToSlash(path)
+	if isAbsPath(path) {
+		if strings.HasSuffix(path, "/") && path != "/" {
+			path = strings.TrimSuffix(path, "/")
+		}
+		return path
+	}
+	for strings.HasPrefix(path, "./") {
+		path = path[2:]
+	}
+	if path == "" {
+		return "."
+	}
+	if strings.HasSuffix(path, "/") {
+		path = strings.TrimSuffix(path, "/")
+	}
+	return path
+}
+
+func isAbsPath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	if len(path) >= 2 && path[1] == ':' {
+		return true
+	}
+	return strings.HasPrefix(path, "/")
 }
