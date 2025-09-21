@@ -79,6 +79,57 @@ func (s *S) init() {
 `,
 			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
 		},
+		{
+			name: "const true variable",
+			src: `package p
+
+const alwaysTrue = true
+
+func f() {
+    set := map[string]bool{}
+    set["a"] = alwaysTrue
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+		},
+		{
+			name: "local true variable",
+			src: `package p
+
+func f() {
+    flag := true
+    set := make(map[string]bool)
+    set["a"] = flag
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+		},
+		{
+			name: "local variable reassigned false before use",
+			src: `package p
+
+func f() {
+    flag := true
+    flag = false
+    set := make(map[string]bool)
+    set["a"] = flag
+}
+`,
+			wantMsgs: nil,
+		},
+		{
+			name: "global true variable not trusted",
+			src: `package p
+
+var alwaysTrue = true
+
+func f() {
+    set := make(map[string]bool)
+    set["a"] = alwaysTrue
+}
+`,
+			wantMsgs: nil,
+		},
 	}
 
 	for _, tc := range tests {

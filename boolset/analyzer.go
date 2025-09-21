@@ -3,6 +3,7 @@ package boolset
 import (
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 )
@@ -20,10 +21,11 @@ func Analyze(pkg *types.Package, files []*ast.File, info *types.Info) []Diagnost
 	}
 
 	v := &analyzer{
-		pkg:       pkg,
-		info:      info,
-		results:   make(map[types.Object]*mapInfo),
-		qualifier: makeQualifier(pkg),
+		pkg:        pkg,
+		info:       info,
+		results:    make(map[types.Object]*mapInfo),
+		qualifier:  makeQualifier(pkg),
+		boolValues: make(map[types.Object]truthState),
 	}
 
 	for _, file := range files {
@@ -52,10 +54,11 @@ func Analyze(pkg *types.Package, files []*ast.File, info *types.Info) []Diagnost
 }
 
 type analyzer struct {
-	pkg       *types.Package
-	info      *types.Info
-	results   map[types.Object]*mapInfo
-	qualifier types.Qualifier
+	pkg        *types.Package
+	info       *types.Info
+	results    map[types.Object]*mapInfo
+	qualifier  types.Qualifier
+	boolValues map[types.Object]truthState
 }
 
 type mapInfo struct {
@@ -82,23 +85,22 @@ func (a *analyzer) inspectFile(file *ast.File) {
 			a.handleAssign(node)
 		case *ast.CompositeLit:
 			a.handleComposite(node, stack)
+		case *ast.ValueSpec:
+			a.handleValueSpec(node)
 		}
 		return true
 	})
 }
 
 func (a *analyzer) handleAssign(assign *ast.AssignStmt) {
-	if assign.Tok != token.ASSIGN {
-		return
-	}
 	rhsLen := len(assign.Rhs)
 	for i, lhs := range assign.Lhs {
 		idx, ok := lhs.(*ast.IndexExpr)
-		if !ok {
-			continue
-		}
 		rhsExpr := exprAt(assign.Rhs, rhsLen, i)
-		if rhsExpr == nil {
+		if rhsExpr != nil {
+			a.trackVarAssignment(lhs, rhsExpr, assign.Tok)
+		}
+		if !ok || assign.Tok != token.ASSIGN || rhsExpr == nil {
 			continue
 		}
 		obj := a.mapObject(idx.X)
@@ -106,7 +108,7 @@ func (a *analyzer) handleAssign(assign *ast.AssignStmt) {
 		if info == nil {
 			continue
 		}
-		info.recordAssignment(rhsExpr, idx.Pos())
+		info.recordAssignment(a, rhsExpr, idx.Pos())
 	}
 }
 
@@ -131,7 +133,32 @@ func (a *analyzer) handleComposite(lit *ast.CompositeLit, stack []ast.Node) {
 		if !ok {
 			continue
 		}
-		info.recordAssignment(kv.Value, kv.Value.Pos())
+		info.recordAssignment(a, kv.Value, kv.Value.Pos())
+	}
+}
+
+func (a *analyzer) handleValueSpec(spec *ast.ValueSpec) {
+	namesLen := len(spec.Names)
+	if namesLen == 0 {
+		return
+	}
+	valuesLen := len(spec.Values)
+	if valuesLen == 0 {
+		return
+	}
+	for i, name := range spec.Names {
+		rhs := exprAt(spec.Values, valuesLen, i)
+		if rhs == nil {
+			continue
+		}
+		obj := a.info.Defs[name]
+		if obj == nil {
+			obj = a.info.Uses[name]
+		}
+		if obj == nil {
+			continue
+		}
+		a.recordVarAssignment(obj, rhs)
 	}
 }
 
@@ -243,23 +270,18 @@ func (a *analyzer) objectOfAssignable(expr ast.Expr) types.Object {
 	}
 }
 
-func (mi *mapInfo) recordAssignment(rhs ast.Expr, pos token.Pos) {
+func (mi *mapInfo) recordAssignment(a *analyzer, rhs ast.Expr, pos token.Pos) {
 	if mi == nil {
 		return
 	}
 	if mi.pos == token.NoPos && pos.IsValid() {
 		mi.pos = pos
 	}
-	if isExplicitTrue(rhs) {
+	if a.isDefinitelyTrue(rhs) {
 		mi.trueCount++
 		return
 	}
 	mi.onlyTrue = false
-}
-
-func isExplicitTrue(expr ast.Expr) bool {
-	ident, ok := expr.(*ast.Ident)
-	return ok && ident.Name == "true"
 }
 
 func isBool(t types.Type) bool {
@@ -290,4 +312,117 @@ func makeQualifier(pkg *types.Package) types.Qualifier {
 		}
 		return other.Name()
 	}
+}
+
+type truthState int
+
+const (
+	truthUnknown truthState = iota
+	truthAlwaysTrue
+	truthNotAlwaysTrue
+)
+
+func (a *analyzer) trackVarAssignment(lhs ast.Expr, rhs ast.Expr, tok token.Token) {
+	ident, ok := lhs.(*ast.Ident)
+	if !ok {
+		return
+	}
+	if ident.Name == "_" {
+		return
+	}
+	var obj types.Object
+	if tok == token.DEFINE {
+		obj = a.info.Defs[ident]
+	} else {
+		obj = a.info.Uses[ident]
+	}
+	if obj == nil {
+		obj = a.info.Defs[ident]
+	}
+	if obj == nil {
+		return
+	}
+	a.recordVarAssignment(obj, rhs)
+}
+
+func (a *analyzer) recordVarAssignment(obj types.Object, rhs ast.Expr) {
+	v, ok := obj.(*types.Var)
+	if !ok {
+		return
+	}
+	if !isBool(v.Type()) {
+		return
+	}
+	if !a.isLocalVar(v) {
+		return
+	}
+	if a.boolValues == nil {
+		a.boolValues = make(map[types.Object]truthState)
+	}
+	if a.isDefinitelyTrue(rhs) {
+		if a.boolValues[obj] == truthUnknown {
+			a.boolValues[obj] = truthAlwaysTrue
+		}
+		return
+	}
+	a.boolValues[obj] = truthNotAlwaysTrue
+}
+
+func (a *analyzer) isDefinitelyTrue(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if tv, ok := a.info.Types[expr]; ok && tv.Value != nil {
+		if tv.Value.Kind() == constant.Bool {
+			return constant.BoolVal(tv.Value)
+		}
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if obj := a.info.Uses[e]; obj != nil {
+			return a.objectIsDefinitelyTrue(obj)
+		}
+		if obj := a.info.Defs[e]; obj != nil {
+			return a.objectIsDefinitelyTrue(obj)
+		}
+	case *ast.ParenExpr:
+		return a.isDefinitelyTrue(e.X)
+	}
+	return false
+}
+
+func (a *analyzer) objectIsDefinitelyTrue(obj types.Object) bool {
+	switch o := obj.(type) {
+	case *types.Const:
+		if v := o.Val(); v != nil && v.Kind() == constant.Bool {
+			return constant.BoolVal(v)
+		}
+	case *types.Var:
+		if a.boolValues != nil && a.boolValues[obj] == truthAlwaysTrue {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *analyzer) isLocalVar(v *types.Var) bool {
+	if v == nil {
+		return false
+	}
+	if v.IsField() {
+		return false
+	}
+	scope := v.Parent()
+	if scope == nil {
+		return false
+	}
+	pkg := v.Pkg()
+	if pkg != nil && scope == pkg.Scope() {
+		return false
+	}
+	// Parameters live in func scope but initial value unknown; skip them.
+	if v.Pos() == token.NoPos {
+		return false
+	}
+	return true
 }
