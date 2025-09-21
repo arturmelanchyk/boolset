@@ -23,14 +23,18 @@ func main() {
 	flag.Parse()
 	targets, err := expandTargets(flag.Args())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		if _, err := fmt.Fprintln(os.Stderr, err); err != nil {
+			os.Exit(2)
+		}
 		os.Exit(1)
 	}
 
 	hadError := false
 	for _, path := range targets {
 		if err := inspectPath(path); err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			if _, err := fmt.Fprintln(os.Stderr, err); err != nil {
+				os.Exit(2)
+			}
 			hadError = true
 		}
 	}
@@ -113,7 +117,7 @@ func inspectDir(dir string) error {
 	for _, diag := range diagnostics {
 		pos := fileSet.Position(diag.Pos)
 		if _, err := fmt.Fprintf(os.Stderr, "%s:%d:%d: %s\n", pos.Filename, pos.Line, pos.Column, diag.Message); err != nil {
-			return fmt.Errorf("failed to write to stderr: %w", err)
+			os.Exit(2)
 		}
 	}
 	return errors.New("boolsetlint found issues")
