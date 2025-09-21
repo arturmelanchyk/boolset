@@ -1,0 +1,132 @@
+package boolset
+
+import (
+	"go/ast"
+	"go/importer"
+	"go/parser"
+	"go/token"
+	"go/types"
+	"sort"
+	"testing"
+)
+
+func TestAnalyze(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		src      string
+		wantMsgs []string
+	}{
+		{
+			name: "only true assignments",
+			src: `package p
+
+func f() {
+    set := map[string]bool{}
+    set["a"] = true
+    set["b"] = true
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+		},
+		{
+			name: "includes false",
+			src: `package p
+
+func f() {
+    set := map[string]bool{}
+    set["a"] = true
+    set["b"] = false
+}
+`,
+			wantMsgs: nil,
+		},
+		{
+			name: "variable assignment",
+			src: `package p
+
+func f(b bool) {
+    set := map[string]bool{}
+    set["a"] = b
+}
+`,
+			wantMsgs: nil,
+		},
+		{
+			name: "composite literal",
+			src: `package p
+
+var set = map[string]bool{
+    "a": true,
+    "b": true,
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+		},
+		{
+			name: "struct field",
+			src: `package p
+
+type S struct {
+    set map[string]bool
+}
+
+func (s *S) init() {
+    s.set = make(map[string]bool)
+    s.set["ok"] = true
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			diags, _ := runAnalyze(t, tc.src)
+			if len(diags) != len(tc.wantMsgs) {
+				t.Fatalf("expected %d diagnostics, got %d", len(tc.wantMsgs), len(diags))
+			}
+			sort.Slice(diags, func(i, j int) bool {
+				return diags[i].Message < diags[j].Message
+			})
+			sort.Strings(tc.wantMsgs)
+			for i, msg := range tc.wantMsgs {
+				if diags[i].Message != msg {
+					t.Fatalf("unexpected diagnostic %q, want %q", diags[i].Message, msg)
+				}
+			}
+		})
+	}
+}
+
+func runAnalyze(t *testing.T, src string) ([]Diagnostic, *token.FileSet) {
+	t.Helper()
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "test.go", src, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	files := []*ast.File{file}
+	info := &types.Info{
+		Types:      make(map[ast.Expr]types.TypeAndValue),
+		Defs:       make(map[*ast.Ident]types.Object),
+		Uses:       make(map[*ast.Ident]types.Object),
+		Selections: make(map[*ast.SelectorExpr]*types.Selection),
+	}
+
+	conf := types.Config{
+		Importer: importer.Default(),
+		Error:    func(err error) {},
+	}
+	pkg, err := conf.Check(file.Name.Name, fset, files, info)
+	if err != nil && pkg == nil {
+		t.Fatalf("type check error: %v", err)
+	}
+
+	diags := Analyze(pkg, files, info)
+	return diags, fset
+}
