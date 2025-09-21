@@ -30,23 +30,31 @@ func main() {
 	}
 
 	hadError := false
+	totalIssues := 0
 	for _, path := range targets {
-		if err := inspectPath(path); err != nil {
+		count, err := inspectPath(path)
+		totalIssues += count
+		if err != nil {
 			if _, err := fmt.Fprintln(os.Stderr, err); err != nil {
 				os.Exit(2)
 			}
 			hadError = true
 		}
 	}
-	if hadError {
+	if totalIssues > 0 {
+		if _, err := fmt.Fprintf(os.Stderr, "boolsetlint found %d issue(s)\n", totalIssues); err != nil {
+			os.Exit(2)
+		}
+	}
+	if hadError || totalIssues > 0 {
 		os.Exit(1)
 	}
 }
 
-func inspectPath(path string) error {
+func inspectPath(path string) (int, error) {
 	info, err := os.Stat(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if info.IsDir() {
 		return inspectDir(path)
@@ -54,10 +62,10 @@ func inspectPath(path string) error {
 	return inspectDir(filepath.Dir(path))
 }
 
-func inspectDir(dir string) error {
+func inspectDir(dir string) (int, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	hasGo := false
 	for _, entry := range entries {
@@ -67,24 +75,24 @@ func inspectDir(dir string) error {
 		}
 	}
 	if !hasGo {
-		return nil
+		return 0, nil
 	}
 
 	buildPkg, err := build.Default.ImportDir(dir, 0)
 	if err != nil {
 		var noGo *build.NoGoError
 		if errors.As(err, &noGo) {
-			return nil
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
 
 	files, fileSet, err := parseFiles(dir, buildPkg.GoFiles)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(files) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	pkgName := files[0].Name.Name
@@ -102,12 +110,12 @@ func inspectDir(dir string) error {
 
 	pkgTypes, err := conf.Check(pkgName, fileSet, files, info)
 	if pkgTypes == nil {
-		return err
+		return 0, err
 	}
 
 	diagnostics := boolset.Analyze(pkgTypes, files, info)
 	if len(diagnostics) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	sort.Slice(diagnostics, func(i, j int) bool {
@@ -120,7 +128,7 @@ func inspectDir(dir string) error {
 			os.Exit(2)
 		}
 	}
-	return errors.New("boolsetlint found issues")
+	return len(diagnostics), nil
 }
 
 func parseFiles(dir string, names []string) ([]*ast.File, *token.FileSet, error) {

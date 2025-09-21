@@ -61,6 +61,9 @@ go install github.com/arturmelanchyk/boolset/cmd/boolsetlint@latest
 The CLI understands Go's `...` package patterns, so paths like `./...` or `internal/...` recurse through matching
 directories. Use standard shell quoting if your shell expands `...` glob patterns.
 
+When issues are detected, `boolsetlint` prints each diagnostic and finishes with a summary line reporting the total
+count, e.g. `boolsetlint found 3 issue(s)`.
+
 ## Limitations and roadmap
 
 The linter focuses on provable `true` assignments. It does not attempt deep data-flow analysis across function
