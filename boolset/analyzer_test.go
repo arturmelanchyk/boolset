@@ -8,9 +8,11 @@ import (
 	"go/types"
 	"sort"
 	"testing"
+
+	"golang.org/x/tools/go/analysis"
 )
 
-func TestAnalyze(t *testing.T) {
+func TestAnalyzer(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -28,7 +30,7 @@ func f() {
     set["b"] = true
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
 		},
 		{
 			name: "includes false",
@@ -62,7 +64,7 @@ var set = map[string]bool{
     "b": true,
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
 		},
 		{
 			name: "struct field",
@@ -77,7 +79,7 @@ func (s *S) init() {
     s.set["ok"] = true
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
 		},
 		{
 			name: "const true variable",
@@ -90,7 +92,7 @@ func f() {
     set["a"] = alwaysTrue
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
 		},
 		{
 			name: "local true variable",
@@ -102,7 +104,7 @@ func f() {
     set["a"] = flag
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
 		},
 		{
 			name: "local variable reassigned false before use",
@@ -135,24 +137,22 @@ func f() {
 	for _, tc := range tests {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			diags, _ := runAnalyze(t, tc.src)
+			diags := runNewAnalyzer(t, tc.src)
 			if len(diags) != len(tc.wantMsgs) {
 				t.Fatalf("expected %d diagnostics, got %d", len(tc.wantMsgs), len(diags))
 			}
-			sort.Slice(diags, func(i, j int) bool {
-				return diags[i].Message < diags[j].Message
-			})
+			sort.Strings(diags)
 			sort.Strings(tc.wantMsgs)
 			for i, msg := range tc.wantMsgs {
-				if diags[i].Message != msg {
-					t.Fatalf("unexpected diagnostic %q, want %q", diags[i].Message, msg)
+				if diags[i] != msg {
+					t.Fatalf("unexpected diagnostic %q, want %q", diags[i], msg)
 				}
 			}
 		})
 	}
 }
 
-func runAnalyze(t *testing.T, src string) ([]Diagnostic, *token.FileSet) {
+func runNewAnalyzer(t *testing.T, src string) []string {
 	t.Helper()
 
 	fset := token.NewFileSet()
@@ -178,6 +178,22 @@ func runAnalyze(t *testing.T, src string) ([]Diagnostic, *token.FileSet) {
 		t.Fatalf("type check error: %v", err)
 	}
 
-	diags := Analyze(pkg, files, info)
-	return diags, fset
+	var messages []string
+	pass := &analysis.Pass{
+		Analyzer:  NewAnalyzer(),
+		Fset:      fset,
+		Files:     files,
+		Pkg:       pkg,
+		TypesInfo: info,
+		Report: func(diag analysis.Diagnostic) {
+			messages = append(messages, diag.Message)
+		},
+	}
+
+	_, err = NewAnalyzer().Run(pass)
+	if err != nil {
+		t.Fatalf("analyzer run error: %v", err)
+	}
+
+	return messages
 }

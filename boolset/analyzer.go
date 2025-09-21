@@ -6,6 +6,8 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+
+	"golang.org/x/tools/go/analysis"
 )
 
 // Diagnostic represents a linter finding.
@@ -47,7 +49,7 @@ func Analyze(pkg *types.Package, files []*ast.File, info *types.Info) []Diagnost
 		key := mi.keyType
 		diags = append(diags, Diagnostic{
 			Pos:     pos,
-			Message: fmt.Sprintf("map[%s]bool only stores ***true*** values; consider map[%s]struct{}", key, key),
+			Message: fmt.Sprintf("map[%s]bool only stores \"true\" values; consider map[%s]struct{}", key, key),
 		})
 	}
 	return diags
@@ -425,4 +427,21 @@ func (a *analyzer) isLocalVar(v *types.Var) bool {
 		return false
 	}
 	return true
+}
+
+// NewAnalyzer returns a new analyzer instance for the boolset linter.
+func NewAnalyzer() *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "boolset",
+		Doc:  "reports map[T]bool values that only store \"true\" and should be map[T]struct{}",
+		Run:  runAnalyzer,
+	}
+}
+
+func runAnalyzer(pass *analysis.Pass) (interface{}, error) {
+	diagnostics := Analyze(pass.Pkg, pass.Files, pass.TypesInfo)
+	for _, diag := range diagnostics {
+		pass.Reportf(diag.Pos, "%s", diag.Message)
+	}
+	return nil, nil
 }
