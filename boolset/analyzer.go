@@ -47,7 +47,7 @@ func Analyze(pkg *types.Package, files []*ast.File, info *types.Info) []Diagnost
 		key := mi.keyType
 		diags = append(diags, Diagnostic{
 			Pos:     pos,
-			Message: fmt.Sprintf("map[%s]bool only stores true values; consider map[%s]struct{}", key, key),
+			Message: fmt.Sprintf("map[%s]bool only stores ***true*** values; consider map[%s]struct{}", key, key),
 		})
 	}
 	return diags

@@ -28,7 +28,7 @@ func f() {
     set["b"] = true
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
 		},
 		{
 			name: "includes false",
@@ -62,7 +62,7 @@ var set = map[string]bool{
     "b": true,
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
 		},
 		{
 			name: "struct field",
@@ -77,7 +77,7 @@ func (s *S) init() {
     s.set["ok"] = true
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
 		},
 		{
 			name: "const true variable",
@@ -90,7 +90,7 @@ func f() {
     set["a"] = alwaysTrue
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
 		},
 		{
 			name: "local true variable",
@@ -102,7 +102,7 @@ func f() {
     set["a"] = flag
 }
 `,
-			wantMsgs: []string{"map[string]bool only stores true values; consider map[string]struct{}"},
+			wantMsgs: []string{"map[string]bool only stores ***true*** values; consider map[string]struct{}"},
 		},
 		{
 			name: "local variable reassigned false before use",
