@@ -132,6 +132,92 @@ func f() {
 `,
 			wantMsgs: nil,
 		},
+		{
+			name: "tuple assignment all true",
+			src: `package p
+
+func f() {
+    set := make(map[string]bool)
+    set["a"], set["b"] = true, true
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+		},
+		{
+			name: "tuple assignment with false",
+			src: `package p
+
+func f() {
+    set := make(map[string]bool)
+    set["a"], set["b"] = true, false
+}
+`,
+			wantMsgs: nil,
+		},
+		{
+			name: "constant folded true expression",
+			src: `package p
+
+func f() {
+    set := make(map[string]bool)
+    set["a"] = 1 < 2
+    set["b"] = !false
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+		},
+		{
+			name: "type alias map",
+			src: `package p
+
+type stringSet map[string]bool
+
+func f() {
+    set := make(stringSet)
+    set["a"] = true
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+		},
+		{
+			name: "chained true locals",
+			src: `package p
+
+func f() {
+    flag := true
+    alias := flag
+    set := make(map[string]bool)
+    set["a"] = alias
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+		},
+		{
+			name: "loop assignments",
+			src: `package p
+
+func f() {
+    keys := []string{"a", "b"}
+    set := make(map[string]bool)
+    for _, k := range keys {
+        set[k] = true
+    }
+}
+`,
+			wantMsgs: []string{"map[string]bool only stores \"true\" values; consider map[string]struct{}"},
+		},
+		{
+			name: "pointer dereference assignment not reported",
+			src: `package p
+
+func f() {
+    set := make(map[string]bool)
+    setPtr := &set
+    (*setPtr)["a"] = true
+}
+`,
+			wantMsgs: nil,
+		},
 	}
 
 	for _, tc := range tests {
