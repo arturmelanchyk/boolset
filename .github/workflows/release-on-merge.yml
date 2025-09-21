@@ -1,0 +1,58 @@
+name: Release On Merge
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  test-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Run tests
+        run: go test -race -p 4 ./...
+
+      - name: Determine next tag
+        id: determine_tag
+        run: |
+          git fetch --tags
+          latest=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+          if [ -z "$latest" ]; then
+            next="v0.1.0"
+          else
+            version=${latest#v}
+            IFS='.' read -r major minor patch <<< "$version"
+            major=${major:-0}
+            minor=${minor:-0}
+            minor=$((minor + 1))
+            next="v${major}.${minor}.0"
+          fi
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        if: steps.determine_tag.outputs.tag != ''
+        env:
+          TAG_NAME: ${{ steps.determine_tag.outputs.tag }}
+          GITHUB_TOKEN: ${{ secrets.CI_TOKEN }}
+        run: |
+          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
+            echo "Tag $TAG_NAME already exists; skipping"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG_NAME"
+          git push origin "$TAG_NAME"
