@@ -244,6 +244,33 @@ func TestAnalyzer(t *testing.T) {
 			wantMsgs: []string{diagMsg},
 		},
 		{
+			name: "nested map only true values",
+			src: `package p
+
+				func f() {
+					sets := map[string]map[string]bool{}
+					sets["first"] = make(map[string]bool)
+					inner := sets["first"]
+					inner["a"] = true
+				}
+				`,
+			wantMsgs: []string{diagMsg},
+		},
+		{
+			name: "nested map includes false",
+			src: `package p
+
+				func f() {
+					sets := map[string]map[string]bool{}
+					sets["first"] = make(map[string]bool)
+					inner := sets["first"]
+					inner["a"] = true
+					inner["b"] = false
+				}
+				`,
+			wantMsgs: nil,
+		},
+		{
 			name: "pointer dereference assignment not reported",
 			src: `package p
 
