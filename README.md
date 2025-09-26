@@ -64,6 +64,53 @@ directories. Use standard shell quoting if your shell expands `...` glob pattern
 When issues are detected, `boolsetlint` prints each diagnostic and finishes with a summary line reporting the total
 count, e.g. `boolsetlint found 3 issue(s)`.
 
+### golangci-lint integration
+
+`boolset` also ships as a golangci-lint module plugin, making it easy to wire into existing linting pipelines that rely
+on golangci-lint's orchestrated runner.
+
+1. Build the plugin shared object locally (optional if you plan to load it via module reference):
+
+   ```bash
+   go build -buildmode=plugin -o boolset.so ./plugin/golangci
+   ```
+
+   (Pick any output path you prefer; adjust the following config accordingly.)
+
+2. Configure golangci-lint to load the plugin and enable the linter. You can either point at a locally built shared
+   object or let golangci-lint fetch the module directly.
+
+   **Local shared object**
+
+   ```yaml
+   run:
+     # Ensure the runner sees your plugin; paths are resolved relative to the config file.
+     plugins:
+       - path: ./boolset.so
+
+   linters:
+     enable:
+       - boolset
+   ```
+
+   **Module plugin fetched by golangci-lint**
+
+   ```yaml
+   version: v2.5.0
+   plugins:
+     - module: github.com/arturmelanchyk/boolset
+       import: github.com/arturmelanchyk/boolset/plugin/golangci
+       version: v0.1.0
+
+   linters:
+     enable:
+       - boolset
+   ```
+
+   Replace `v0.1.0` with the release tag you want to pin to (`latest` also works during experimentation).
+
+With that in place, `golangci-lint run` will execute the boolset analyzer alongside the other enabled linters.
+
 ## Limitations and roadmap
 
 The linter focuses on provable `true` assignments. It does not attempt deep data-flow analysis across function
